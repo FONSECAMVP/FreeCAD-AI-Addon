@@ -29,13 +29,30 @@ def test_set_and_get_base_url(prefs):
     assert prefs.base_url == "https://api.openai.com/v1"
 
 
-def test_get_model_default(prefs):
-    assert prefs.model == "gpt-4o"
+def test_get_model_default_openai(prefs):
+    assert prefs.openai_model == "gpt-4o"
+    assert prefs.model == "gpt-4o"  # derived: openai is default provider
 
 
-def test_set_and_get_model(prefs):
-    prefs.model = "claude-sonnet-4-6"
-    assert prefs.model == "claude-sonnet-4-6"
+def test_get_model_default_anthropic(prefs):
+    assert prefs.anthropic_model == "claude-sonnet-4-6"
+
+
+def test_model_derived_from_provider(prefs):
+    prefs.provider = "anthropic"
+    assert prefs.model == prefs.anthropic_model
+    prefs.provider = "openai"
+    assert prefs.model == prefs.openai_model
+
+
+def test_set_and_get_openai_model(prefs):
+    prefs.openai_model = "gpt-4-turbo"
+    assert prefs.openai_model == "gpt-4-turbo"
+
+
+def test_set_and_get_anthropic_model(prefs):
+    prefs.anthropic_model = "claude-opus-4-8"
+    assert prefs.anthropic_model == "claude-opus-4-8"
 
 
 def test_get_max_tokens_default(prefs):

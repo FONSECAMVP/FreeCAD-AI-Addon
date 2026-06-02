@@ -1,7 +1,10 @@
 """
 Preferences module — DES-006, REQ-001, DEC-006.
 Non-sensitive fields: FreeCAD Preferences XML.
-api_key / anthropic_api_key: OS keychain via keyring; fallback to env vars.
+API keys: OS keychain via keyring; fallback to env vars.
+
+OpenAI and Anthropic settings are stored independently so switching
+providers never sends the wrong model name to the wrong API.
 """
 
 from __future__ import annotations
@@ -24,22 +27,18 @@ _KEY_ANTHROPIC = "anthropic_api_key"
 _PROVIDERS = ("openai", "anthropic")
 
 _DEFAULTS: dict = {
-    "base_url": "http://localhost:11434/v1",
-    "model": "gpt-4o",
-    "max_tokens": 8000,
     "provider": "openai",
-}
-
-# Suggested model names shown as placeholder text per provider
-_MODEL_HINTS = {
-    "openai": "gpt-4o",
-    "anthropic": "claude-sonnet-4-6",
+    # OpenAI-compatible section
+    "base_url": "http://localhost:11434/v1",
+    "openai_model": "gpt-4o",
+    # Anthropic section
+    "anthropic_model": "claude-sonnet-4-6",
+    # General
+    "max_tokens": 8000,
 }
 
 
 class _NoKeyring:
-    """Sentinel returned when keyring is unavailable."""
-
     def get_password(self, service: str, key: str) -> None:
         return None
 
@@ -50,11 +49,11 @@ class _NoKeyring:
 class AIPreferences:
     """
     Thin wrapper over FreeCAD Preferences + keyring.
-    In headless/test mode, falls back to an in-memory dict.
+    Falls back to an in-memory dict in headless/test mode.
     """
 
     def __init__(self) -> None:
-        self._mem: dict = {}  # in-memory fallback (tests / headless)
+        self._mem: dict = {}
         try:
             import FreeCAD  # lazy
 
@@ -62,7 +61,7 @@ class AIPreferences:
         except (ImportError, AttributeError):
             self._fc_prefs = None
 
-    # --- helpers ---
+    # --- internal helpers ---
 
     def _get_str(self, key: str) -> str:
         if self._fc_prefs:
@@ -92,14 +91,13 @@ class AIPreferences:
         return keyring
 
     def _kr_get(self, key_name: str, env_var: str) -> str | None:
-        kr = self._keyring()
         try:
-            val = kr.get_password(_SERVICE, key_name)
+            val = self._keyring().get_password(_SERVICE, key_name)
         except Exception:
             val = None
         return val or os.environ.get(env_var) or None
 
-    # --- public properties ---
+    # --- provider ---
 
     @property
     def provider(self) -> str:
@@ -111,6 +109,8 @@ class AIPreferences:
         if value in _PROVIDERS:
             self._set_str("provider", value)
 
+    # --- OpenAI-compatible settings ---
+
     @property
     def base_url(self) -> str:
         return self._get_str("base_url")
@@ -120,12 +120,47 @@ class AIPreferences:
         self._set_str("base_url", value)
 
     @property
-    def model(self) -> str:
-        return self._get_str("model")
+    def openai_model(self) -> str:
+        return self._get_str("openai_model")
 
-    @model.setter
-    def model(self, value: str) -> None:
-        self._set_str("model", value)
+    @openai_model.setter
+    def openai_model(self, value: str) -> None:
+        self._set_str("openai_model", value)
+
+    @property
+    def api_key(self) -> str | None:
+        return self._kr_get(_KEY_OPENAI, "FC_AI_API_KEY")
+
+    @api_key.setter
+    def api_key(self, value: str) -> None:
+        self._keyring().set_password(_SERVICE, _KEY_OPENAI, value)
+
+    # --- Anthropic settings ---
+
+    @property
+    def anthropic_model(self) -> str:
+        return self._get_str("anthropic_model")
+
+    @anthropic_model.setter
+    def anthropic_model(self, value: str) -> None:
+        self._set_str("anthropic_model", value)
+
+    @property
+    def anthropic_api_key(self) -> str | None:
+        return self._kr_get(_KEY_ANTHROPIC, "FC_AI_ANTHROPIC_KEY")
+
+    @anthropic_api_key.setter
+    def anthropic_api_key(self, value: str) -> None:
+        self._keyring().set_password(_SERVICE, _KEY_ANTHROPIC, value)
+
+    # --- derived / general ---
+
+    @property
+    def model(self) -> str:
+        """Active model for the selected provider."""
+        if self.provider == "anthropic":
+            return self.anthropic_model
+        return self.openai_model
 
     @property
     def max_tokens(self) -> int:
@@ -134,24 +169,6 @@ class AIPreferences:
     @max_tokens.setter
     def max_tokens(self, value: int) -> None:
         self._set_int("max_tokens", value)
-
-    @property
-    def api_key(self) -> str | None:
-        """OpenAI-compatible API key."""
-        return self._kr_get(_KEY_OPENAI, "FC_AI_API_KEY")
-
-    @api_key.setter
-    def api_key(self, value: str) -> None:
-        self._keyring().set_password(_SERVICE, _KEY_OPENAI, value)
-
-    @property
-    def anthropic_api_key(self) -> str | None:
-        """Anthropic API key (Claude models)."""
-        return self._kr_get(_KEY_ANTHROPIC, "FC_AI_ANTHROPIC_KEY")
-
-    @anthropic_api_key.setter
-    def anthropic_api_key(self, value: str) -> None:
-        self._keyring().set_password(_SERVICE, _KEY_ANTHROPIC, value)
 
     @property
     def is_configured(self) -> bool:
@@ -163,14 +180,7 @@ class AIPreferences:
 class AIPreferencePage:
     """
     REQ-001, DEC-006, DES-006 — FreeCAD preferences page.
-
-    Standard FreeCAD prefs idiom (see AddonManager/AddonManagerOptions.py):
-    plain class with `self.form` = QWidget built in `__init__`, plus
-    saveSettings()/loadSettings() methods. FreeCAD instantiates the class
-    each time the prefs dialog opens, reads `self.form` (Gui/WidgetFactory
-    .cpp:285), then uses `form->windowTitle()` as the tab label
-    (WidgetFactory.cpp:296). `__init__` accepts an optional positional
-    arg because some FreeCAD code paths pass the parent.
+    OpenAI and Anthropic are configured in separate named sections.
     """
 
     def __init__(self, _parent=None):
@@ -178,99 +188,130 @@ class AIPreferencePage:
             from PySide2.QtWidgets import (
                 QComboBox,
                 QFormLayout,
+                QGroupBox,
                 QLabel,
                 QLineEdit,
                 QSpinBox,
+                QVBoxLayout,
                 QWidget,
             )
         except ImportError:
             from PySide6.QtWidgets import (  # type: ignore[no-redef]
                 QComboBox,
                 QFormLayout,
+                QGroupBox,
                 QLabel,
                 QLineEdit,
                 QSpinBox,
+                QVBoxLayout,
                 QWidget,
             )
 
         self._prefs = AIPreferences()
         self.form = QWidget()
         self.form.setWindowTitle("Settings")
-        layout = QFormLayout(self.form)
+        root = QVBoxLayout(self.form)
+        root.setSpacing(8)
 
-        # Provider selector
+        # --- Provider selector ---
+        top_form = QFormLayout()
         self._provider = QComboBox()
         self._provider.addItem("OpenAI / Compatible", "openai")
         self._provider.addItem("Anthropic (Claude)", "anthropic")
-        layout.addRow(QLabel("Provider:"), self._provider)
+        top_form.addRow(QLabel("Active provider:"), self._provider)
+        root.addLayout(top_form)
 
-        # Model — free-text; placeholder updates when provider changes
-        self._model = QLineEdit()
-        layout.addRow(QLabel("Model name:"), self._model)
+        # --- OpenAI section ---
+        self._openai_box = QGroupBox("OpenAI / Compatible")
+        oai_form = QFormLayout(self._openai_box)
 
-        # OpenAI-compatible fields
         self._base_url = QLineEdit()
         self._base_url.setPlaceholderText("http://localhost:11434/v1")
-        layout.addRow(QLabel("API base URL:"), self._base_url)
+        oai_form.addRow(QLabel("API base URL:"), self._base_url)
+
+        self._openai_model = QLineEdit()
+        self._openai_model.setPlaceholderText("gpt-4o")
+        oai_form.addRow(QLabel("Model:"), self._openai_model)
 
         self._api_key = QLineEdit()
         self._api_key.setPlaceholderText("sk-… (stored in OS keychain)")
         self._api_key.setEchoMode(QLineEdit.Password)
-        layout.addRow(QLabel("OpenAI API key:"), self._api_key)
+        oai_form.addRow(QLabel("API key:"), self._api_key)
 
-        # Anthropic-specific fields
+        root.addWidget(self._openai_box)
+
+        # --- Anthropic section ---
+        self._anthropic_box = QGroupBox("Anthropic (Claude)")
+        ant_form = QFormLayout(self._anthropic_box)
+
+        self._anthropic_model = QLineEdit()
+        self._anthropic_model.setPlaceholderText("claude-sonnet-4-6")
+        ant_form.addRow(QLabel("Model:"), self._anthropic_model)
+
         self._anthropic_key = QLineEdit()
         self._anthropic_key.setPlaceholderText("sk-ant-… (stored in OS keychain)")
         self._anthropic_key.setEchoMode(QLineEdit.Password)
-        layout.addRow(QLabel("Anthropic API key:"), self._anthropic_key)
+        ant_form.addRow(QLabel("API key:"), self._anthropic_key)
+
+        root.addWidget(self._anthropic_box)
+
+        # --- General section ---
+        general_box = QGroupBox("General")
+        gen_form = QFormLayout(general_box)
 
         self._max_tokens = QSpinBox()
         self._max_tokens.setRange(1000, 128000)
         self._max_tokens.setSingleStep(1000)
-        layout.addRow(QLabel("Max context tokens:"), self._max_tokens)
+        gen_form.addRow(QLabel("Max context tokens:"), self._max_tokens)
+
+        root.addWidget(general_box)
+        root.addStretch()
 
         self._provider.currentIndexChanged.connect(self._on_provider_changed)
         self.loadSettings()
 
-    def _on_provider_changed(self, _index: int) -> None:
+    def _on_provider_changed(self, _index: int = 0) -> None:
         provider = self._provider.currentData()
-        hint = _MODEL_HINTS.get(provider, "")
-        self._model.setPlaceholderText(hint)
-        self._base_url.setEnabled(provider == "openai")
-        self._api_key.setEnabled(provider == "openai")
-        self._anthropic_key.setEnabled(provider == "anthropic")
+        # Bold the active section, dim the inactive one
+        self._openai_box.setEnabled(True)
+        self._anthropic_box.setEnabled(True)
+        if provider == "openai":
+            self._openai_box.setStyleSheet("QGroupBox { font-weight: bold; }")
+            self._anthropic_box.setStyleSheet("QGroupBox { color: gray; }")
+        else:
+            self._openai_box.setStyleSheet("QGroupBox { color: gray; }")
+            self._anthropic_box.setStyleSheet("QGroupBox { font-weight: bold; }")
 
     def loadSettings(self):
-        provider = self._prefs.provider
-        idx = self._provider.findData(provider)
+        idx = self._provider.findData(self._prefs.provider)
         if idx >= 0:
             self._provider.setCurrentIndex(idx)
 
-        current_model = self._prefs.model
-        self._model.setText(current_model)
-        self._model.setPlaceholderText(_MODEL_HINTS.get(provider, ""))
-
         self._base_url.setText(self._prefs.base_url)
+        self._openai_model.setText(self._prefs.openai_model)
         self._api_key.setText(self._prefs.api_key or "")
+
+        self._anthropic_model.setText(self._prefs.anthropic_model)
         self._anthropic_key.setText(self._prefs.anthropic_api_key or "")
+
         self._max_tokens.setValue(self._prefs.max_tokens)
-        self._on_provider_changed(0)  # apply enabled/disabled state
+        self._on_provider_changed()
 
     def saveSettings(self):
-        provider = self._provider.currentData()
-        self._prefs.provider = provider
-
-        model = self._model.text().strip()
-        if model:
-            self._prefs.model = model
-        elif not self._prefs.model:
-            self._prefs.model = _MODEL_HINTS.get(provider, "")
+        self._prefs.provider = self._provider.currentData()
 
         self._prefs.base_url = self._base_url.text().strip()
+        openai_model = self._openai_model.text().strip()
+        if openai_model:
+            self._prefs.openai_model = openai_model
 
         openai_key = self._api_key.text().strip()
         if openai_key:
             self._prefs.api_key = openai_key
+
+        anthropic_model = self._anthropic_model.text().strip()
+        if anthropic_model:
+            self._prefs.anthropic_model = anthropic_model
 
         anthropic_key = self._anthropic_key.text().strip()
         if anthropic_key:
