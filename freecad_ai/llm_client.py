@@ -46,8 +46,10 @@ class ToolCall:
 # ---------------------------------------------------------------------------
 
 class LLMClient:
+    _TIMEOUT = 60.0  # seconds — local models can be slow, but 60s surfaces real failures
+
     def __init__(self, base_url: str, api_key: str, model: str) -> None:
-        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=self._TIMEOUT)
         self._model = model
 
     async def chat(
@@ -181,12 +183,13 @@ def _to_anthropic_tools(tools: list[dict]) -> list[dict]:
 
 
 class AnthropicLLMClient:
-    _MAX_TOKENS = 4096  # max response tokens (separate from context window)
+    _MAX_TOKENS = 4096   # max response tokens (separate from context window)
+    _TIMEOUT = 60.0      # seconds — surfaces network/auth errors instead of hanging
 
     def __init__(self, api_key: str, model: str) -> None:
         from anthropic import AsyncAnthropic  # lazy — not required at module load
 
-        self._client = AsyncAnthropic(api_key=api_key)
+        self._client = AsyncAnthropic(api_key=api_key, timeout=self._TIMEOUT)
         self._model = model
 
     async def chat(
@@ -209,21 +212,19 @@ class AnthropicLLMClient:
         if anthropic_tools:
             kwargs["tools"] = anthropic_tools
 
+        # Use non-streaming create() — avoids a deadlock between text_stream and
+        # get_final_message() where the underlying SSE stream is consumed by
+        # text_stream before tool_use blocks can be extracted.
         try:
-            async with self._client.messages.stream(**kwargs) as stream:
-                # Stream text chunks first
-                async for text in stream.text_stream:
-                    yield text
-
-                # After stream ends, extract any tool calls from the final message
-                final = await stream.get_final_message()
-
-            for block in final.content:
-                if block.type == "tool_use":
-                    yield ToolCall(id=block.id, name=block.name, args=block.input)
-
+            response = await self._client.messages.create(**kwargs)
         except AnthropicAPIError as exc:
             raise LLMError(str(exc)) from exc
+
+        for block in response.content:
+            if block.type == "text":
+                yield block.text
+            elif block.type == "tool_use":
+                yield ToolCall(id=block.id, name=block.name, args=block.input)
 
 
 # ---------------------------------------------------------------------------
