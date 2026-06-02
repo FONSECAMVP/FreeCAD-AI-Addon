@@ -1,0 +1,18 @@
+# Un-ignore pre-commit config (root .gitignore blocks all dotfiles via .*)
+!.pre-commit-config.yaml
+
+# Bundled dependency venv — created automatically on first FreeCAD startup
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Test artifacts
+.coverage
+.pytest_cache/
+.ruff_cache/
+htmlcov/

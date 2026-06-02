@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<!--
+  FreeCAD Addon Manager metadata — DEC-011 (rollout: standalone Addon Manager pkg).
+  When creating the external repo, this file goes in the repo root.
+  Submit to: https://github.com/FreeCAD/FreeCAD-addons
+-->
+<package format="1">
+  <name>FreeCAD AI Addon</name>
+  <description>
+    Chat panel that lets you describe design intent in natural language.
+    An LLM calls structured tools to execute FreeCAD operations (Part,
+    PartDesign, Sketcher, Draft, BIM) with full undo support.
+    Requires an OpenAI-compatible API key (OpenAI, Ollama, LM Studio, etc.).
+  </description>
+  <version>0.1.0</version>
+  <date>2026-05-12</date>
+  <maintainer email="andersoncapitalsas@gmail.com">Andy F.</maintainer>
+  <license file="LICENSE">LGPL-2.1-or-later</license>
+  <!-- Replace [user] with actual GitHub username before publishing -->
+  <url type="repository">https://github.com/FONSECAMVP/FreeCAD-AI-Addon</url>
+  <url type="readme">https://github.com/FONSECAMVP/FreeCAD-AI-Addon/blob/main/README.md</url>
+  <tag>LLM</tag>
+  <tag>AI</tag>
+  <tag>automation</tag>
+  <tag>chat</tag>
+  <tag>natural language</tag>
+  <pythonmin>3.10</pythonmin>
+  <freecadmin>0.21</freecadmin>
+  <content>
+    <workbench>
+      <name>AI Addon</name>
+      <classname>AIAddonWorkbench</classname>
+      <description>
+        Dockable AI chat panel with tool registry for all major workbenches.
+      </description>
+      <subdirectory>.</subdirectory>
+    </workbench>
+  </content>
+</package>

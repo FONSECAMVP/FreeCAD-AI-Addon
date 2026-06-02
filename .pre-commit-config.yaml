@@ -1,0 +1,33 @@
+files: ^src/Mod/AIAddon/
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        additional_dependencies: [openai, keyring]
+        files: ^src/Mod/AIAddon/freecad_ai/
+
+  - repo: local
+    hooks:
+      - id: no-exec-eval
+        name: "Ban exec/eval in addon source"
+        language: pygrep
+        entry: '\bexec\s*\(|\beval\s*\('
+        files: ^src/Mod/AIAddon/freecad_ai/
+        types: [python]
+
+      - id: fast-tests
+        name: "Fast unit tests"
+        language: system
+        entry: bash -c "cd src/Mod/AIAddon && .venv/bin/python -m pytest -m fast --tb=short -q"
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
