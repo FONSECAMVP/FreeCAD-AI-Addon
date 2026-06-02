@@ -58,7 +58,7 @@ def _bootstrap_deps() -> bool:
 
     try:
         subprocess.run(
-            [str(pip), "install", "--quiet", "openai>=1.30", "keyring>=24"],
+            [str(pip), "install", "--quiet", "openai>=1.30", "anthropic>=0.25", "keyring>=24"],
             check=True,
             timeout=120,
         )
@@ -89,6 +89,11 @@ try:
     from . import _compat  # noqa: F401
 except ImportError:
     _MISSING.append("openai")
+
+try:
+    import anthropic  # noqa: F401
+except ImportError:
+    _MISSING.append("anthropic")
 
 try:
     import keyring  # noqa: F401

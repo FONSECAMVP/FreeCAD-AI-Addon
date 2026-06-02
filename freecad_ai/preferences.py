@@ -1,7 +1,7 @@
 """
 Preferences module — DES-006, REQ-001, DEC-006.
 Non-sensitive fields: FreeCAD Preferences XML.
-api_key: OS keychain via keyring; fallback to FC_AI_API_KEY env var.
+api_key / anthropic_api_key: OS keychain via keyring; fallback to env vars.
 """
 
 from __future__ import annotations
@@ -18,12 +18,22 @@ except ImportError:
     _KEYRING_OK = False
 
 _SERVICE = "freecad-ai"
-_KEY_NAME = "api_key"
+_KEY_OPENAI = "api_key"
+_KEY_ANTHROPIC = "anthropic_api_key"
 
-_DEFAULTS = {
+_PROVIDERS = ("openai", "anthropic")
+
+_DEFAULTS: dict = {
     "base_url": "http://localhost:11434/v1",
     "model": "gpt-4o",
     "max_tokens": 8000,
+    "provider": "openai",
+}
+
+# Suggested model names shown as placeholder text per provider
+_MODEL_HINTS = {
+    "openai": "gpt-4o",
+    "anthropic": "claude-sonnet-4-6",
 }
 
 
@@ -81,7 +91,25 @@ class AIPreferences:
             return _NoKeyring()
         return keyring
 
+    def _kr_get(self, key_name: str, env_var: str) -> str | None:
+        kr = self._keyring()
+        try:
+            val = kr.get_password(_SERVICE, key_name)
+        except Exception:
+            val = None
+        return val or os.environ.get(env_var) or None
+
     # --- public properties ---
+
+    @property
+    def provider(self) -> str:
+        val = self._get_str("provider")
+        return val if val in _PROVIDERS else "openai"
+
+    @provider.setter
+    def provider(self, value: str) -> None:
+        if value in _PROVIDERS:
+            self._set_str("provider", value)
 
     @property
     def base_url(self) -> str:
@@ -109,21 +137,26 @@ class AIPreferences:
 
     @property
     def api_key(self) -> str | None:
-        kr = self._keyring()
-        try:
-            val = kr.get_password(_SERVICE, _KEY_NAME)
-        except Exception:
-            val = None
-        if val:
-            return val
-        return os.environ.get("FC_AI_API_KEY") or None
+        """OpenAI-compatible API key."""
+        return self._kr_get(_KEY_OPENAI, "FC_AI_API_KEY")
 
     @api_key.setter
     def api_key(self, value: str) -> None:
-        self._keyring().set_password(_SERVICE, _KEY_NAME, value)
+        self._keyring().set_password(_SERVICE, _KEY_OPENAI, value)
+
+    @property
+    def anthropic_api_key(self) -> str | None:
+        """Anthropic API key (Claude models)."""
+        return self._kr_get(_KEY_ANTHROPIC, "FC_AI_ANTHROPIC_KEY")
+
+    @anthropic_api_key.setter
+    def anthropic_api_key(self, value: str) -> None:
+        self._keyring().set_password(_SERVICE, _KEY_ANTHROPIC, value)
 
     @property
     def is_configured(self) -> bool:
+        if self.provider == "anthropic":
+            return self.anthropic_api_key is not None
         return self.api_key is not None
 
 
@@ -143,6 +176,7 @@ class AIPreferencePage:
     def __init__(self, _parent=None):
         try:
             from PySide2.QtWidgets import (
+                QComboBox,
                 QFormLayout,
                 QLabel,
                 QLineEdit,
@@ -151,6 +185,7 @@ class AIPreferencePage:
             )
         except ImportError:
             from PySide6.QtWidgets import (  # type: ignore[no-redef]
+                QComboBox,
                 QFormLayout,
                 QLabel,
                 QLineEdit,
@@ -160,41 +195,85 @@ class AIPreferencePage:
 
         self._prefs = AIPreferences()
         self.form = QWidget()
-        # Empty windowTitle makes the page invisible in DlgPreferencesImp
-        # (WidgetFactory.cpp:296 reads form->windowTitle()).
         self.form.setWindowTitle("Settings")
         layout = QFormLayout(self.form)
 
+        # Provider selector
+        self._provider = QComboBox()
+        self._provider.addItem("OpenAI / Compatible", "openai")
+        self._provider.addItem("Anthropic (Claude)", "anthropic")
+        layout.addRow(QLabel("Provider:"), self._provider)
+
+        # Model — free-text; placeholder updates when provider changes
+        self._model = QLineEdit()
+        layout.addRow(QLabel("Model name:"), self._model)
+
+        # OpenAI-compatible fields
         self._base_url = QLineEdit()
         self._base_url.setPlaceholderText("http://localhost:11434/v1")
         layout.addRow(QLabel("API base URL:"), self._base_url)
 
-        self._model = QLineEdit()
-        self._model.setPlaceholderText("gpt-4o")
-        layout.addRow(QLabel("Model name:"), self._model)
-
         self._api_key = QLineEdit()
         self._api_key.setPlaceholderText("sk-… (stored in OS keychain)")
         self._api_key.setEchoMode(QLineEdit.Password)
-        layout.addRow(QLabel("API key:"), self._api_key)
+        layout.addRow(QLabel("OpenAI API key:"), self._api_key)
+
+        # Anthropic-specific fields
+        self._anthropic_key = QLineEdit()
+        self._anthropic_key.setPlaceholderText("sk-ant-… (stored in OS keychain)")
+        self._anthropic_key.setEchoMode(QLineEdit.Password)
+        layout.addRow(QLabel("Anthropic API key:"), self._anthropic_key)
 
         self._max_tokens = QSpinBox()
         self._max_tokens.setRange(1000, 128000)
         self._max_tokens.setSingleStep(1000)
         layout.addRow(QLabel("Max context tokens:"), self._max_tokens)
 
+        self._provider.currentIndexChanged.connect(self._on_provider_changed)
         self.loadSettings()
 
+    def _on_provider_changed(self, _index: int) -> None:
+        provider = self._provider.currentData()
+        hint = _MODEL_HINTS.get(provider, "")
+        self._model.setPlaceholderText(hint)
+        self._base_url.setEnabled(provider == "openai")
+        self._api_key.setEnabled(provider == "openai")
+        self._anthropic_key.setEnabled(provider == "anthropic")
+
     def loadSettings(self):
+        provider = self._prefs.provider
+        idx = self._provider.findData(provider)
+        if idx >= 0:
+            self._provider.setCurrentIndex(idx)
+
+        current_model = self._prefs.model
+        self._model.setText(current_model)
+        self._model.setPlaceholderText(_MODEL_HINTS.get(provider, ""))
+
         self._base_url.setText(self._prefs.base_url)
-        self._model.setText(self._prefs.model)
         self._api_key.setText(self._prefs.api_key or "")
+        self._anthropic_key.setText(self._prefs.anthropic_api_key or "")
         self._max_tokens.setValue(self._prefs.max_tokens)
+        self._on_provider_changed(0)  # apply enabled/disabled state
 
     def saveSettings(self):
+        provider = self._provider.currentData()
+        self._prefs.provider = provider
+
+        model = self._model.text().strip()
+        if model:
+            self._prefs.model = model
+        elif not self._prefs.model:
+            self._prefs.model = _MODEL_HINTS.get(provider, "")
+
         self._prefs.base_url = self._base_url.text().strip()
-        self._prefs.model = self._model.text().strip()
-        key = self._api_key.text().strip()
-        if key:
-            self._prefs.api_key = key
+
+        openai_key = self._api_key.text().strip()
+        if openai_key:
+            self._prefs.api_key = openai_key
+
+        anthropic_key = self._anthropic_key.text().strip()
+        if anthropic_key:
+            self._prefs.anthropic_api_key = anthropic_key
+
         self._prefs.max_tokens = self._max_tokens.value()

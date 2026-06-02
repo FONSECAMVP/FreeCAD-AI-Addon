@@ -11,7 +11,7 @@ if not DEPS_OK:
 else:
     from freecad_ai.conversation import ConversationHistory
     from freecad_ai.executor import ToolExecutor
-    from freecad_ai.llm_client import SYSTEM_PROMPT, LLMClient
+    from freecad_ai.llm_client import SYSTEM_PROMPT, make_llm_client
     from freecad_ai.preferences import AIPreferencePage, AIPreferences
     from freecad_ai.registry import ToolRegistry
 
@@ -37,12 +37,8 @@ else:
     # Default args bind values at def time. FreeCAD's mod loader execs InitGui.py
     # in a non-module scope, so `def` functions cannot resolve module-level names
     # at call time (the function's __globals__ is FreeCADGuiInit, not this scope).
-    def _make_llm_client(_LLMClient=LLMClient, _prefs=_prefs):
-        return _LLMClient(
-            base_url=_prefs.base_url,
-            api_key=_prefs.api_key or "",
-            model=_prefs.model,
-        )
+    def _make_llm_client(_factory=make_llm_client, _prefs=_prefs):
+        return _factory(_prefs)
 
     # Register chat panel (REQ-002) — deferred import to keep Qt out of headless path.
     # Use PySide2 directly: FreeCADGui.Qt does not expose Qt.RightDockWidgetArea on 1.0.

@@ -31,7 +31,7 @@ def _fresh_import():
 
 @pytest.mark.fast
 def test_deps_ok_when_all_present():
-    """openai + keyring importable → DEPS_OK True, _MISSING empty."""
+    """openai + anthropic + keyring importable → DEPS_OK True, _MISSING empty."""
     mod = _fresh_import()
     assert mod.DEPS_OK is True
     assert [] == mod._MISSING
@@ -59,8 +59,8 @@ def test_deps_fail_keyring_missing():
 
 @pytest.mark.fast
 def test_deps_fail_both_missing():
-    """Both absent → DEPS_OK False, both in _MISSING, no exception raised."""
-    with patch.dict(sys.modules, {"openai": None, "keyring": None}):
+    """All three absent → DEPS_OK False, all in _MISSING, no exception raised."""
+    with patch.dict(sys.modules, {"openai": None, "anthropic": None, "keyring": None}):
         mod = _fresh_import()
     assert mod.DEPS_OK is False
-    assert set(mod._MISSING) == {"openai", "keyring"}
+    assert set(mod._MISSING) == {"openai", "anthropic", "keyring"}
