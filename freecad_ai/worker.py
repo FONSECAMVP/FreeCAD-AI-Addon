@@ -38,6 +38,10 @@ async def run_chat(
                 await on_tool_call(item.id, item.name, item.args)
     except LLMError as exc:
         await on_error(str(exc))
+    except Exception as exc:
+        # Catch anything the provider client didn't wrap as LLMError
+        # (httpx internals, import failures, unexpected response shapes, etc.)
+        await on_error(f"Unexpected error: {type(exc).__name__}: {exc}")
 
 
 # --- Qt wrapper (not imported in headless/test mode) ---
@@ -83,7 +87,26 @@ def _make_llm_worker_class():
             self._tool_results[tool_name] = result
 
         def run(self) -> None:
-            asyncio.run(self._async_run())
+            # Bypass any global asyncio event loop policy FreeCAD may have
+            # installed (e.g. qasync). We need a plain SelectorEventLoop that
+            # works correctly in a background QThread with no Qt event loop.
+            loop = asyncio.SelectorEventLoop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self._async_run())
+            except Exception as exc:
+                # Last-resort catch: _async_run should never raise because
+                # run_chat swallows all exceptions via on_error, but guard
+                # against unexpected failures so finished always fires.
+                self.error.emit(f"Worker crashed: {type(exc).__name__}: {exc}")
+            finally:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+                # Always emit finished so the panel unblocks regardless of
+                # how the async run ended.
+                self.finished.emit()
 
         async def _async_run(self) -> None:
             async def on_token(text: str) -> None:
@@ -106,7 +129,6 @@ def _make_llm_worker_class():
                 on_tool_call=on_tool_call,
                 on_error=on_error,
             )
-            self.finished.emit()
 
     return LLMWorker
 
