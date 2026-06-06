@@ -41,7 +41,18 @@ def _handle_get_object_properties(args: dict) -> dict:
             props[prop] = str(getattr(obj, prop))
         except Exception:
             props[prop] = "<unreadable>"
-    return {"label": obj.Label, "type": obj.TypeId, "properties": props}
+    result = {"label": obj.Label, "type": obj.TypeId, "properties": props}
+    shape = getattr(obj, "Shape", None)
+    if shape is not None:
+        try:
+            result["shape_info"] = {
+                "is_valid": shape.isValid(),
+                "solid_count": len(shape.Solids),
+                "volume_mm3": round(shape.Volume, 3),
+            }
+        except Exception as exc:
+            result["shape_info"] = {"error": str(exc)}
+    return result
 
 
 def _handle_get_bounding_box(args: dict) -> dict:
