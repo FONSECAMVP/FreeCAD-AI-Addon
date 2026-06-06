@@ -1,0 +1,6 @@
+{
+  "freecad-ai": {
+    "command": "freecadcmd",
+    "args": ["freecad_mcp_server.py"]
+  }
+}

@@ -37,6 +37,8 @@ def _bootstrap_deps() -> bool:
     venv_dir = _ADDON_ROOT / ".venv"
     _log("[AI Addon] First-time setup: installing dependencies (openai, keyring)…\n")
 
+    _pkgs = ["openai>=1.30", "anthropic>=0.25", "keyring>=24"]
+
     try:
         # Create the venv using FreeCAD's own Python interpreter.
         subprocess.run(
@@ -46,6 +48,34 @@ def _bootstrap_deps() -> bool:
         )
     except Exception as exc:
         _warn(f"[AI Addon] Could not create venv: {exc}\n")
+        # Fallback for PEP 668 managed environments (Debian/Ubuntu Python 3.12+).
+        # python3-venv may not be installed; try a direct --user install instead.
+        _warn("[AI Addon] Trying user-level pip install as fallback…\n")
+        for extra in (["--user", "--break-system-packages"], ["--user"]):
+            try:
+                subprocess.run(
+                    [_sys.executable, "-m", "pip", "install", "--quiet", *extra, *_pkgs],
+                    check=True,
+                    timeout=120,
+                )
+                # Re-inject user site-packages so imports work in this session.
+                try:
+                    import site as _site_mod
+                    _user_site = _site_mod.getusersitepackages()
+                    if _user_site and _user_site not in _sys.path:
+                        _sys.path.insert(0, _user_site)
+                except Exception:
+                    pass
+                _log("[AI Addon] Dependencies installed. Restart FreeCAD to activate the chat panel.\n")
+                return True
+            except Exception:
+                pass
+        _warn(
+            "[AI Addon] Automatic install failed.\n"
+            "Run manually (Debian/Ubuntu):\n"
+            f"  python3 -m pip install --user --break-system-packages {' '.join(_pkgs)}\n"
+            "Then restart FreeCAD.\n"
+        )
         return False
 
     # Locate pip inside the new venv (cross-platform).
@@ -58,7 +88,7 @@ def _bootstrap_deps() -> bool:
 
     try:
         subprocess.run(
-            [str(pip), "install", "--quiet", "openai>=1.30", "anthropic>=0.25", "keyring>=24"],
+            [str(pip), "install", "--quiet", *_pkgs],
             check=True,
             timeout=120,
         )
