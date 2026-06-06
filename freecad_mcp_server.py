@@ -411,5 +411,5 @@ def main() -> None:
     asyncio.run(_run_stdio())
 
 
-if __name__ == "__main__":
+if __name__ in ("__main__", "freecad_mcp_server"):
     main()
